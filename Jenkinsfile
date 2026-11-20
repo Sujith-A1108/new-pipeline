@@ -1,151 +1,52 @@
+
 pipeline {
     agent any
 
-    environment {
-        DOCKER_IMAGE = 'sujith1108/tomcat-web'
-        IMAGE_TAG = 'latest'
-        CONTAINER_NAME = 'tomcat-app'
-        APP_PORT = '5000'
+    tools {
+        maven 'Maven'
+        jdk 'JDK25'
     }
 
     stages {
 
-        // Stage 1: Build Docker Image
-        stage('Build Docker Image') {
+        // Stage 1: Checkout source code
+        stage('Checkout') {
             steps {
-                bat '''
-                    docker build -t %DOCKER_IMAGE%:%IMAGE_TAG% .
-                '''
+                git branch: 'main',
+                    url: 'https://github.com/Sujith-A1108/new-pipeline.git',
+                    credentialsId: 'Github-Token'
+
+                echo 'Source code downloaded successfully'
             }
         }
 
-        // Stage 2: Docker Environment Check
-        stage('Docker Environment Check') {
+        // Stage 2: Build the application
+        stage('Build') {
             steps {
-                powershell '''
-                    Write-Host "Windows User:"
-                    whoami
-
-                    Write-Host "Docker Version:"
-                    docker --version
-
-                    Write-Host "Docker Engine:"
-                    docker info --format "{{.ServerVersion}}"
-                '''
+                bat 'mvn clean compile'
             }
         }
 
-        // Stage 3: Login to Docker Hub
-        stage('Login to DockerHub') {
+        // Stage 3: Execute test cases
+        stage('Test') {
             steps {
-                withEnv(["DOCKER_CONFIG=${env.WORKSPACE}\\.docker"]) {
-                    withCredentials([
-                        usernamePassword(
-                            credentialsId: 'dockerhub-login',
-                            usernameVariable: 'DOCKER_USER',
-                            passwordVariable: 'DOCKER_TOKEN'
-                        )
-                    ]) {
-                        powershell '''
-                            $ErrorActionPreference = "Stop"
-
-                            New-Item -ItemType Directory `
-                                -Force -Path $env:DOCKER_CONFIG | Out-Null
-
-                            $configPath = Join-Path $env:DOCKER_CONFIG "config.json"
-                            '{"auths":{}}' | Set-Content -Path $configPath -Encoding ASCII
-
-                            $cleanUser = $env:DOCKER_USER.Trim()
-                            $cleanToken = $env:DOCKER_TOKEN.Trim()
-
-                            if ([string]::IsNullOrWhiteSpace($cleanUser) -or [string]::IsNullOrWhiteSpace($cleanToken)) {
-                                throw "DOCKER_USER or DOCKER_TOKEN is empty"
-                            }
-
-                            $psi = New-Object System.Diagnostics.ProcessStartInfo
-                            $psi.FileName = "docker.exe"
-                            $psi.Arguments = "--config `"$env:DOCKER_CONFIG`" login -u `"$cleanUser`" --password-stdin"
-                            $psi.UseShellExecute = $false
-                            $psi.RedirectStandardInput = $true
-                            $psi.RedirectStandardOutput = $true
-                            $psi.RedirectStandardError = $true
-                            $psi.CreateNoWindow = $true
-
-                            $p = New-Object System.Diagnostics.Process
-                            $p.StartInfo = $psi
-
-                            [void]$p.Start()
-
-                            $bytes = [System.Text.Encoding]::ASCII.GetBytes($cleanToken + "`n")
-                            $p.StandardInput.BaseStream.Write($bytes, 0, $bytes.Length)
-                            $p.StandardInput.Close()
-
-                            $output = $p.StandardOutput.ReadToEnd()
-                            $errorOutput = $p.StandardError.ReadToEnd()
-                            $p.WaitForExit()
-
-                            Write-Host $output
-
-                            if ($p.ExitCode -ne 0) {
-                                Write-Host $errorOutput
-                                throw "DockerHub login failed"
-                            }
-
-                            Write-Host "DockerHub login successful"
-                        '''
-                    }
-                }
+                bat 'mvn test'
             }
         }
 
-        // Stage 4: Push Docker Image
-        stage('Push Image') {
+        // Stage 4: Package the application
+        stage('Package') {
             steps {
-                withEnv(["DOCKER_CONFIG=${env.WORKSPACE}\\.docker"]) {
-                    bat '''
-                        docker push %DOCKER_IMAGE%:%IMAGE_TAG%
-                    '''
-                }
+                bat 'mvn package'
             }
         }
 
-        // Stage 5: Deploy Container
-        stage('Deploy Container') {
+        // Stage 5: Run the application
+        stage('Run Application') {
             steps {
-                withEnv(["DOCKER_CONFIG=${env.WORKSPACE}\\.docker"]) {
-                    bat '''
-                        docker stop %CONTAINER_NAME% 2>NUL
-                        docker rm %CONTAINER_NAME% 2>NUL
-
-                        docker run -d ^
-                            --name %CONTAINER_NAME% ^
-                            -p %APP_PORT%:%APP_PORT% ^
-                            %DOCKER_IMAGE%:%IMAGE_TAG%
-
-                        docker ps
-                    '''
-                }
+                bat 'mvn exec:java -Dexec.mainClass="com.example.app.App"'
             }
         }
     }
 
-    post {
-        success {
-            echo 'CI/CD Pipeline completed successfully!'
-            echo 'Docker image pushed and application deployed.'
-        }
-
-        failure {
-            echo 'CI/CD Pipeline failed. Check the Console Output.'
-        }
-
-        always {
-            bat '''
-                if exist "%WORKSPACE%\\.docker" (
-                    rmdir /s /q "%WORKSPACE%\\.docker"
-                )
-            '''
-            echo 'Pipeline execution completed.'
-        }
-    }
 }
