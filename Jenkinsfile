@@ -2,9 +2,9 @@ pipeline {
     agent any
 
     environment {
-        DOCKER_IMAGE = 'naveen04jan/my-python-app3'
+        DOCKER_IMAGE = 'sujith1108/tomcat-web'
         IMAGE_TAG = 'latest'
-        CONTAINER_NAME = 'my-python-container'
+        CONTAINER_NAME = 'tomcat-app'
         APP_PORT = '5000'
     }
 
